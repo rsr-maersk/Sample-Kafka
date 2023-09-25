@@ -3,6 +3,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Confluent.Kafka;
 using MassTransit;
+using MassTransit.Transports;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using retinaWithMtAmq;
@@ -21,44 +22,52 @@ Log.Logger = new LoggerConfiguration()
 
 var services = new ServiceCollection()
     .AddLogging(configuration => configuration.AddSerilog(Log.Logger))
-    .AddMassTransit(x =>
-{
-    x.UsingInMemory();
-    x.AddConsumer<Consumer1>();
-    x.AddRider(rider =>
+    //.AddMassTransit(x =>
+    .ConfigureKafkaTestOptions(options =>
     {
-        rider.AddProducer<Class1>("msk.nscm.playground-dev.topic.internal.dedicated.v1");
-        rider.AddConsumer<Consumer1>();
-        rider.UsingKafka((context, k) =>
+        options.CreateTopicsIfNotExists = true;
+        options.TopicNames = new[] { "msk.nscm.playground-dev.topic.internal.dedicated.v1" };
+    }).AddMassTransitTestHarness(x =>
+    {
+        x.UsingInMemory();
+        x.AddConsumer<Consumer1>();
+        x.AddRider(rider =>
         {
-            k.Host(retinaDedicated["Host"], kafkaConfig =>
+            rider.AddProducer<Class1>("msk.nscm.playground-dev.topic.internal.dedicated.v1");
+            rider.AddConsumer<Consumer1>();
+            rider.UsingKafka((context, k) =>
             {
-                kafkaConfig.UseSasl(sasl =>
-                {
-                    sasl.Username = retinaDedicated["SaslUsername"];
-                    sasl.Password = retinaDedicated["SaslPassword"];
-                    sasl.Mechanism = SaslMechanism.ScramSha512;
-                    sasl.SecurityProtocol = SecurityProtocol.SaslSsl;
-                });
-                kafkaConfig.UseSsl(ssl =>
-                {
-                    ssl.SslCaPem = Encoding.UTF8.GetString(Convert.FromBase64String(retinaDedicated["SslCaCert"]));
-                    ssl.KeyPassword = retinaDedicated["SslKeyPassword"];
-                });
-            });
-            k.ClientId = $"local-{Guid.NewGuid()}";
+                //k.Host(retinaDedicated["Host"], kafkaConfig =>
+                //{
+                //    kafkaConfig.UseSasl(sasl =>
+                //    {
+                //        sasl.Username = retinaDedicated["SaslUsername"];
+                //        sasl.Password = retinaDedicated["SaslPassword"];
+                //        sasl.Mechanism = SaslMechanism.ScramSha512;
+                //        sasl.SecurityProtocol = SecurityProtocol.SaslSsl;
+                //    });
+                //    kafkaConfig.UseSsl(ssl =>
+                //    {
+                //        ssl.SslCaPem = Encoding.UTF8.GetString(Convert.FromBase64String(retinaDedicated["SslCaCert"]));
+                //        ssl.KeyPassword = retinaDedicated["SslKeyPassword"];
+                //    });
+                //});
 
-            k.TopicEndpoint<Class1>("msk.nscm.playground-dev.topic.internal.dedicated.v1",
-                "msk.nscm.playground.consumergroup.v1", c =>
-            {
-                c.GroupInstanceId = "local";
-                c.AutoOffsetReset = AutoOffsetReset.Earliest;
-                c.ConfigureConsumer<Consumer1>(context);
+                k.Host("localhost:9092");
+                k.ClientId = $"local-{Guid.NewGuid()}";
+
+                k.TopicEndpoint<Class1>("msk.nscm.playground-dev.topic.internal.dedicated.v1",
+                    "msk.nscm.playground.consumergroup.v1", c =>
+                {
+                    c.GroupInstanceId = "local";
+                    c.AutoOffsetReset = AutoOffsetReset.Earliest;
+                    c.ConfigureConsumer<Consumer1>(context);
+                    c.CreateIfMissing();
+                });
             });
         });
-    });
 
-});
+    });
 
 await using var provider = services.BuildServiceProvider(true);
 var busControl = provider.GetRequiredService<IBusControl>();
